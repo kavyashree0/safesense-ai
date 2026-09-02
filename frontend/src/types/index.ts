@@ -1,0 +1,215 @@
+// ─── Core Types ───────────────────────────────────────────────────────────────
+
+export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+export type SIFPotential = 'YES' | 'NO' | 'UNKNOWN';
+export type ReportType = 'Unsafe Act' | 'Unsafe Condition' | 'Near Miss' | 'Incident';
+
+export interface SafetyReport {
+  id: string;
+  report_id?: string;
+  report_type: ReportType | string;
+  report_text: string;
+  activity?: string;
+  location?: string;
+  site?: string;
+  date?: string;
+  severity?: string;
+  sif_potential?: SIFPotential;
+  risk_level?: RiskLevel;
+  risk_score?: number;
+  life_saving_rule?: string;
+  barrier_failure?: string;
+  recommended_action?: string;
+  analyzed?: boolean;
+  analysis?: ReportAnalysis;
+  reviewer_status?: 'Pending' | 'Confirmed' | 'Corrected' | 'Rejected';
+  reviewer_comment?: string;
+}
+
+export interface ReportAnalysis {
+  sif_potential: SIFPotential;
+  risk_level: RiskLevel;
+  risk_score: number;
+  activity_detected: string;
+  hazard_detected: string;
+  barrier_failure: string;
+  life_saving_rule: string;
+  evidence_phrases: string[];
+  explanation: string;
+  risk_factors: RiskFactor[];
+  recommended_actions: string[];
+  similar_report_ids: string[];
+  pattern_name?: string;
+  mode: 'rule-based' | 'ml';
+}
+
+export interface RiskFactor {
+  name: string;
+  score: number;
+  max_score: number;
+  description: string;
+}
+
+export interface DatasetInfo {
+  filename: string;
+  filesize: number;
+  rows: number;
+  columns: string[];
+  preview: Record<string, unknown>[];
+  column_mapping: ColumnMapping;
+  quality: DatasetQuality;
+  is_demo: boolean;
+}
+
+export interface ColumnMapping {
+  report_text?: string;
+  sif_label?: string;
+  severity?: string;
+  report_type?: string;
+  location?: string;
+  activity?: string;
+  site?: string;
+  date?: string;
+  barrier_failure?: string;
+  recommended_action?: string;
+  life_saving_rule?: string;
+}
+
+export interface DatasetQuality {
+  health_score: number;
+  total_records: number;
+  total_columns: number;
+  missing_values: Record<string, number>;
+  empty_reports: number;
+  duplicate_records: number;
+  avg_report_length: number;
+  unique_report_types: number;
+  unique_activities: number;
+  unique_sites: number;
+  unique_locations: number;
+  label_distribution?: Record<string, number>;
+  warnings: string[];
+  has_sif_label: boolean;
+  has_date: boolean;
+  has_site: boolean;
+  has_activity: boolean;
+}
+
+export interface SiteRisk {
+  site: string;
+  total_reports: number;
+  sif_count: number;
+  critical_count: number;
+  high_count: number;
+  risk_level: RiskLevel;
+  top_precursor: string;
+  top_barrier_failure: string;
+  risk_score: number;
+  trend: 'increasing' | 'decreasing' | 'stable';
+}
+
+export interface ActivityRisk {
+  activity: string;
+  report_count: number;
+  sif_count: number;
+  avg_risk_score: number;
+  top_barrier_failure: string;
+  trend: 'increasing' | 'decreasing' | 'stable';
+  risk_level: RiskLevel;
+}
+
+export interface SafetyPattern {
+  id: string;
+  name: string;
+  frequency: number;
+  risk_level: RiskLevel;
+  sites: string[];
+  activities: string[];
+  trend: 'increasing' | 'decreasing' | 'stable';
+  description: string;
+  report_ids: string[];
+}
+
+export interface EarlyWarning {
+  id: string;
+  type: 'WATCH' | 'WARNING' | 'CRITICAL';
+  title: string;
+  description: string;
+  metric: string;
+  current_value: number;
+  previous_value: number;
+  change_pct: number;
+  affected_sites: string[];
+  affected_activities: string[];
+}
+
+export interface BarrierFailure {
+  barrier: string;
+  count: number;
+  percentage: number;
+  risk_level: RiskLevel;
+}
+
+export interface CorrectiveAction {
+  id: string;
+  report_id: string;
+  action: string;
+  owner: string;
+  priority: 'Critical' | 'High' | 'Medium' | 'Low';
+  due_date: string;
+  status: 'Open' | 'In Progress' | 'Completed' | 'Overdue';
+  created_at: string;
+}
+
+export interface DashboardMetrics {
+  total_reports: number;
+  sif_potential_count: number;
+  critical_count: number;
+  high_count: number;
+  medium_count: number;
+  low_count: number;
+  early_warnings: number;
+  open_actions: number;
+  sif_percentage: number;
+  top_rule: string;
+  top_barrier: string;
+  top_site: string;
+  is_demo: boolean;
+}
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: 'HSE Officer' | 'Safety Manager' | 'Site Manager' | 'Administrator';
+  site?: string;
+}
+
+export interface AuthState {
+  user: User | null;
+  token: string | null;
+  isAuthenticated: boolean;
+}
+
+export interface CopilotMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+  source_reports?: string[];
+}
+
+export interface KnowledgeNode {
+  id: string;
+  label: string;
+  type: 'site' | 'activity' | 'hazard' | 'barrier' | 'rule' | 'risk';
+  risk_level?: RiskLevel;
+  count?: number;
+}
+
+export interface KnowledgeLink {
+  source: string;
+  target: string;
+  label?: string;
+  weight?: number;
+}
