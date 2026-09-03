@@ -1,10 +1,16 @@
 import { useState, useRef, useCallback } from 'react';
-import { Upload, FileText, X, CheckCircle, AlertCircle, Database, Eye, ChevronLeft, ChevronRight, Search, ArrowUpDown, Download } from 'lucide-react';
+import { Upload, FileText, X, CheckCircle, AlertCircle, Database, Eye, ChevronLeft, ChevronRight, Search, ArrowUpDown, Download, Languages, Globe } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useNavigate } from 'react-router-dom';
 import { detectColumnMapping, analyzeDatasetQuality, rowsToReports, formatFileSize } from '../utils/datasetUtils';
+import { processDataset, formatMultilingualSummary } from '../utils/multilingualUtils';
 import { generateDemoReports, DEMO_COLUMN_MAPPING } from '../data/demoData';
-import { DatasetInfo, ColumnMapping } from '../types';
+import {
+  MULTILINGUAL_SAMPLE_REPORTS, MULTILINGUAL_COLUMN_MAPPING,
+  generateMultilingualCSV,
+} from '../data/multilingualSampleData';
+import { DatasetInfo, ColumnMapping, MultilingualStats, EMPTY_MULTILINGUAL_STATS } from '../types';
+import { MultilingualStatsBanner, LanguageBadge } from '../components/MultilingualBadge';
 
 type Step = 'upload' | 'preview' | 'mapping' | 'quality' | 'done';
 
@@ -26,6 +32,9 @@ export default function UploadPage() {
   const [search, setSearch] = useState('');
   const [sortCol, setSortCol] = useState('');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  // ── Multilingual state ────────────────────────────────────────────────────
+  const [translateEnabled, setTranslateEnabled] = useState(true);
+  const [mlStats, setMlStats] = useState<MultilingualStats | null>(null);
   const PAGE_SIZE = 10;
 
   async function parseFile(file: File) {
@@ -92,11 +101,13 @@ export default function UploadPage() {
     const cols = ['report_id','report_type','report_text','activity','location','site','date','severity','sif_potential','life_saving_rule','barrier_failure','recommended_action'];
     const rows = reports.map(r => ({ ...r })) as Record<string, unknown>[];
     const q = analyzeDatasetQuality(rows, cols, DEMO_COLUMN_MAPPING as never);
+    const demoStats: MultilingualStats = { ...EMPTY_MULTILINGUAL_STATS, total: reports.length, english: reports.length, translate_enabled: true };
     dispatch({
       type: 'SET_DATASET',
       payload: {
         reports,
         isDemo: true,
+        multilingualStats: demoStats,
         dataset: {
           filename: 'demo_safety_reports.csv',
           filesize: 0,
@@ -110,6 +121,57 @@ export default function UploadPage() {
       },
     });
     navigate('/dashboard');
+  }
+
+  function loadMultilingualDemo() {
+    const rows = MULTILINGUAL_SAMPLE_REPORTS.map(r => ({ ...r })) as Record<string, unknown>[];
+    const cols = Object.values(MULTILINGUAL_COLUMN_MAPPING);
+    const q = analyzeDatasetQuality(rows, cols, MULTILINGUAL_COLUMN_MAPPING as never);
+    const reports = rowsToReports(rows, MULTILINGUAL_COLUMN_MAPPING as ColumnMapping, true);
+
+    // Compute actual multilingual stats
+    const mlS: MultilingualStats = { ...EMPTY_MULTILINGUAL_STATS, total: reports.length, translate_enabled: true };
+    for (const r of reports) {
+      switch (r.detected_language) {
+        case 'en': mlS.english++;  break;
+        case 'kn': mlS.kannada++;  break;
+        case 'hi': mlS.hindi++;    break;
+        default:   mlS.unknown++;  break;
+      }
+      if (r.is_translated)     mlS.translated++;
+      if (r.translation_error) mlS.translation_errors++;
+    }
+
+    dispatch({
+      type: 'SET_DATASET',
+      payload: {
+        reports,
+        isDemo: true,
+        multilingualStats: mlS,
+        dataset: {
+          filename: 'SafeSense_multilingual_sample_dataset.csv',
+          filesize: 0,
+          rows: reports.length,
+          columns: cols,
+          preview: rows.slice(0, 10),
+          column_mapping: MULTILINGUAL_COLUMN_MAPPING,
+          quality: q,
+          is_demo: true,
+        } as DatasetInfo,
+      },
+    });
+    navigate('/dashboard');
+  }
+
+  function downloadMultilingualDemo() {
+    const csv = generateMultilingualCSV();
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }); // BOM for Unicode
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'SafeSense_multilingual_sample_dataset.csv';
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   function downloadDemo() {
@@ -131,18 +193,43 @@ export default function UploadPage() {
 
   function proceedToQuality() {
     const q = analyzeDatasetQuality(rawRows, columns, mapping as never);
+
+    // ── Run multilingual detection now so we can show stats in quality step ──
+    if (mapping.report_text) {
+      const texts = rawRows.map(r => String(r[mapping.report_text!] || ''));
+      const langColName = columns.find(c => ['language','lang','detected_language'].includes(c.toLowerCase()));
+      const hints = langColName ? rawRows.map(r => String(r[langColName] || '') || undefined) : undefined;
+      const { stats } = processDataset(texts, hints, translateEnabled);
+      setMlStats({ ...stats, translate_enabled: translateEnabled });
+    }
+
     setQuality(q);
     setStep('quality');
   }
 
   function finalize() {
     if (!quality) return;
-    const reports = rowsToReports(rawRows, mapping);
+    const reports = rowsToReports(rawRows, mapping, translateEnabled);
+
+    // Compute final multilingual stats from processed reports
+    const finalStats: MultilingualStats = { ...EMPTY_MULTILINGUAL_STATS, total: reports.length, translate_enabled: translateEnabled };
+    for (const r of reports) {
+      switch (r.detected_language) {
+        case 'en': finalStats.english++;  break;
+        case 'kn': finalStats.kannada++;  break;
+        case 'hi': finalStats.hindi++;    break;
+        default:   finalStats.unknown++;  break;
+      }
+      if (r.is_translated)     finalStats.translated++;
+      if (r.translation_error) finalStats.translation_errors++;
+    }
+
     dispatch({
       type: 'SET_DATASET',
       payload: {
         reports,
         isDemo: false,
+        multilingualStats: finalStats,
         dataset: {
           filename,
           filesize,
@@ -261,6 +348,39 @@ export default function UploadPage() {
               </div>
             </div>
           </div>
+
+          {/* Multilingual demo section */}
+          <div className="card border-violet-500/20 bg-violet-900/5">
+            <div className="flex items-start gap-4">
+              <Languages className="w-6 h-6 text-violet-400 flex-shrink-0 mt-1" />
+              <div className="flex-1">
+                <h3 className="font-semibold text-white mb-1 flex items-center gap-2">
+                  Multilingual Sample Dataset
+                  <span className="text-xs bg-violet-500/20 text-violet-300 border border-violet-500/30 px-2 py-0.5 rounded-full">NEW</span>
+                </h3>
+                <p className="text-slate-400 text-sm mb-1">
+                  30 synthetic safety reports in <LanguageBadge language="en" size="sm" />{' '}
+                  <LanguageBadge language="kn" size="sm" />{' '}
+                  <LanguageBadge language="hi" size="sm" />{' '}
+                  covering Confined Space, Energy Isolation, Hot Work, and more.
+                </p>
+                <p className="text-slate-500 text-xs mb-3">
+                  Non-English reports are automatically detected and translated to English before SIF analysis.
+                </p>
+                <p className="text-amber-400/80 text-xs mb-3">⚠ Synthetic Demo Data — Not Real Organizational Data</p>
+                <div className="flex gap-3 flex-wrap">
+                  <button onClick={loadMultilingualDemo} className="btn-primary text-sm">
+                    <Globe className="w-4 h-4" />
+                    Use Multilingual Demo
+                  </button>
+                  <button onClick={downloadMultilingualDemo} className="btn-secondary text-sm">
+                    <Download className="w-4 h-4" />
+                    Download Multilingual CSV
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -371,6 +491,51 @@ export default function UploadPage() {
             </div>
           </div>
 
+          {/* ── Multilingual Processing Panel ─────────────────────────────── */}
+          <div className="card border-violet-500/20 bg-violet-900/5">
+            <div className="flex items-center gap-2 mb-3">
+              <Languages className="w-4 h-4 text-violet-400" />
+              <h3 className="font-semibold text-white text-sm">Language Processing</h3>
+            </div>
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <p className="text-sm text-slate-300">Language Detection</p>
+                <p className="text-xs text-slate-500">Automatically detect English, Kannada, and Hindi reports</p>
+              </div>
+              <div className="flex items-center gap-1.5 text-xs text-green-400 bg-green-500/10 border border-green-500/20 px-2.5 py-1 rounded-full">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" />
+                Auto Detect
+              </div>
+            </div>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <div className="relative">
+                <input
+                  type="checkbox"
+                  checked={translateEnabled}
+                  onChange={e => setTranslateEnabled(e.target.checked)}
+                  className="sr-only"
+                />
+                <div className={`w-10 h-5 rounded-full transition-colors ${translateEnabled ? 'bg-violet-600' : 'bg-slate-600'}`} />
+                <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${translateEnabled ? 'translate-x-5' : ''}`} />
+              </div>
+              <div>
+                <p className="text-sm text-slate-300 font-medium">Translate non-English reports to English</p>
+                <p className="text-xs text-slate-500">
+                  {translateEnabled
+                    ? 'Kannada and Hindi reports will be translated before SIF analysis. Original text is preserved.'
+                    : 'Only language detection will run. Original text will be used for analysis.'}
+                </p>
+              </div>
+            </label>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
+              <span>Supported:</span>
+              <LanguageBadge language="en" size="sm" />
+              <LanguageBadge language="kn" size="sm" />
+              <LanguageBadge language="hi" size="sm" />
+              <span className="text-slate-600">· Client-side processing · No data sent externally</span>
+            </div>
+          </div>
+
           {!mapping.sif_label && (
             <div className="flex items-start gap-2 text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg px-4 py-3 text-sm">
               <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
@@ -407,6 +572,9 @@ export default function UploadPage() {
               </div>
             </div>
           </div>
+
+          {/* Multilingual stats banner — shown only when non-English is detected */}
+          {mlStats && <MultilingualStatsBanner stats={mlStats} />}
 
           {/* Metrics */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

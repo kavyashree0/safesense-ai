@@ -1,20 +1,22 @@
 import { useApp } from '../context/AppContext';
 import EmptyState from '../components/EmptyState';
 import { RiskBadge, SIFBadge } from '../components/RiskBadge';
+import { LanguageBadge, TranslationBadge, MultilingualStatsBanner } from '../components/MultilingualBadge';
 import { computeBarrierFailures, computeSiteRisk, computeActivityRisk, computeEarlyWarnings } from '../utils/riskEngine';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, Legend
 } from 'recharts';
-import { AlertTriangle, TrendingUp, Shield, CheckSquare, Activity, MapPin, Zap, ArrowUpRight } from 'lucide-react';
+import { AlertTriangle, TrendingUp, Shield, CheckSquare, Activity, MapPin, Zap, ArrowUpRight, Languages, ChevronDown, ChevronUp } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 
 const RISK_COLORS = { CRITICAL: '#ef4444', HIGH: '#f97316', MEDIUM: '#eab308', LOW: '#22c55e' };
 
 export default function DashboardPage() {
-  const { reports, dataset, isDemo } = useApp();
+  const { reports, dataset, isDemo, multilingualStats } = useApp();
   const navigate = useNavigate();
+  const [showMultilingualTable, setShowMultilingualTable] = useState(false);
 
   const metrics = useMemo(() => {
     if (!reports.length) return null;
@@ -30,6 +32,30 @@ export default function DashboardPage() {
   const siteData = useMemo(() => computeSiteRisk(reports).slice(0, 6), [reports]);
   const activityData = useMemo(() => computeActivityRisk(reports).slice(0, 6), [reports]);
   const warnings = useMemo(() => computeEarlyWarnings(reports), [reports]);
+
+  // ── Multilingual analytics ────────────────────────────────────────────────
+  const hasMultilingual = useMemo(() =>
+    (multilingualStats.kannada > 0 || multilingualStats.hindi > 0),
+    [multilingualStats]
+  );
+
+  const languageChartData = useMemo(() => {
+    if (!hasMultilingual) return [];
+    return [
+      { name: 'English', value: multilingualStats.english,  fill: '#3b82f6' },
+      { name: 'Kannada', value: multilingualStats.kannada,  fill: '#f97316' },
+      { name: 'Hindi',   value: multilingualStats.hindi,    fill: '#22c55e' },
+      ...(multilingualStats.unknown > 0
+        ? [{ name: 'Unknown', value: multilingualStats.unknown, fill: '#64748b' }]
+        : []),
+    ].filter(d => d.value > 0);
+  }, [multilingualStats, hasMultilingual]);
+
+  // Reports with non-English content for the multilingual table
+  const multilingualReports = useMemo(() =>
+    reports.filter(r => r.detected_language === 'kn' || r.detected_language === 'hi'),
+    [reports]
+  );
 
   const severityDist = useMemo(() => {
     const counts: Record<string, number> = { Critical: 0, High: 0, Medium: 0, Low: 0 };
@@ -67,7 +93,7 @@ export default function DashboardPage() {
     { label: 'Critical', value: metrics?.critical || 0, icon: Zap, color: 'text-orange-400', bg: 'bg-orange-600/10 border-orange-500/20', sub: 'Highest priority' },
     { label: 'High Risk', value: metrics?.high || 0, icon: TrendingUp, color: 'text-yellow-400', bg: 'bg-yellow-600/10 border-yellow-500/20', sub: 'Requires attention' },
     { label: 'Early Warnings', value: warnings.length, icon: Activity, color: 'text-violet-400', bg: 'bg-violet-600/10 border-violet-500/20', sub: 'Active alerts' },
-    { label: 'Open Actions', value: 0, icon: CheckSquare, color: 'text-green-400', bg: 'bg-green-600/10 border-green-500/20', sub: 'Corrective actions' },
+    { label: hasMultilingual ? 'Translated' : 'Open Actions', value: hasMultilingual ? multilingualStats.translated : 0, icon: hasMultilingual ? Languages : CheckSquare, color: hasMultilingual ? 'text-indigo-400' : 'text-green-400', bg: hasMultilingual ? 'bg-indigo-600/10 border-indigo-500/20' : 'bg-green-600/10 border-green-500/20', sub: hasMultilingual ? `${multilingualStats.kannada} KN · ${multilingualStats.hindi} HI` : 'Corrective actions' },
   ];
 
   return (
@@ -100,6 +126,79 @@ export default function DashboardPage() {
           </div>
         ))}
       </div>
+
+      {/* ── Multilingual Processing Summary ─────────────────────────────── */}
+      {hasMultilingual && (
+        <MultilingualStatsBanner stats={multilingualStats} />
+      )}
+
+      {/* ── Language Distribution Chart (only when multilingual data present) ─ */}
+      {hasMultilingual && languageChartData.length > 0 && (
+        <div className="grid lg:grid-cols-2 gap-5">
+          {/* Language pie chart */}
+          <div className="card">
+            <h3 className="text-sm font-semibold text-slate-300 mb-4 flex items-center gap-2">
+              <Languages className="w-4 h-4 text-violet-400" />
+              Reports by Language
+            </h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <PieChart>
+                <Pie
+                  data={languageChartData}
+                  dataKey="value"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={70}
+                  label={({ name, value }) => `${name}: ${value}`}
+                  labelLine={false}
+                >
+                  {languageChartData.map((entry, i) => (
+                    <Cell key={i} fill={entry.fill} />
+                  ))}
+                </Pie>
+                <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8, color: '#f1f5f9' }} />
+                <Legend formatter={(val) => <span style={{ color: '#94a3b8', fontSize: 11 }}>{val}</span>} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Language breakdown table */}
+          <div className="card">
+            <h3 className="text-sm font-semibold text-slate-300 mb-4">Multilingual Breakdown</h3>
+            <div className="space-y-3">
+              {[
+                { lang: 'en' as const, label: 'English',  count: multilingualStats.english,  color: 'bg-blue-500' },
+                { lang: 'kn' as const, label: 'Kannada',  count: multilingualStats.kannada,  color: 'bg-orange-500' },
+                { lang: 'hi' as const, label: 'Hindi',    count: multilingualStats.hindi,    color: 'bg-green-500' },
+              ].map(row => (
+                <div key={row.lang}>
+                  <div className="flex items-center justify-between mb-1">
+                    <LanguageBadge language={row.lang} size="sm" />
+                    <span className="text-sm font-semibold text-white">{row.count}</span>
+                  </div>
+                  <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full ${row.color} rounded-full transition-all duration-700`}
+                      style={{ width: `${multilingualStats.total > 0 ? (row.count / multilingualStats.total) * 100 : 0}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+              <div className="pt-2 border-t border-slate-700 flex items-center justify-between text-xs text-slate-400">
+                <span>Translated to English</span>
+                <span className="text-violet-400 font-semibold">{multilingualStats.translated}</span>
+              </div>
+              {multilingualStats.translation_errors > 0 && (
+                <div className="flex items-center justify-between text-xs text-slate-400">
+                  <span>Translation errors (original used)</span>
+                  <span className="text-red-400 font-semibold">{multilingualStats.translation_errors}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Early Warnings */}
       {warnings.length > 0 && (
@@ -267,6 +366,90 @@ export default function DashboardPage() {
       {isDemo && (
         <div className="text-center py-4">
           <p className="text-xs text-amber-400/70">⚠ All data above is synthetic demo data. It does not represent real organizational safety incidents.</p>
+        </div>
+      )}
+
+      {/* ── Multilingual Report Table ──────────────────────────────────────── */}
+      {hasMultilingual && multilingualReports.length > 0 && (
+        <div className="card">
+          <button
+            onClick={() => setShowMultilingualTable(v => !v)}
+            className="flex items-center justify-between w-full"
+          >
+            <h3 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
+              <Languages className="w-4 h-4 text-violet-400" />
+              Multilingual Reports — Original &amp; Translated
+              <span className="text-xs bg-violet-500/20 text-violet-300 border border-violet-500/30 px-2 py-0.5 rounded-full">
+                {multilingualReports.length} reports
+              </span>
+            </h3>
+            {showMultilingualTable
+              ? <ChevronUp className="w-4 h-4 text-slate-400" />
+              : <ChevronDown className="w-4 h-4 text-slate-400" />
+            }
+          </button>
+
+          {showMultilingualTable && (
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-slate-700">
+                    <th className="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">Report ID</th>
+                    <th className="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">Language</th>
+                    <th className="text-left text-slate-500 font-medium pb-2 pr-3 min-w-[200px]">Original Text</th>
+                    <th className="text-left text-slate-500 font-medium pb-2 pr-3 min-w-[200px]">English Translation (used for analysis)</th>
+                    <th className="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">SIF Result</th>
+                    <th className="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">Risk Level</th>
+                    <th className="text-left text-slate-500 font-medium pb-2 whitespace-nowrap">Translation</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {multilingualReports.slice(0, 20).map(r => (
+                    <tr
+                      key={r.id}
+                      className="hover:bg-slate-800/50 cursor-pointer"
+                      onClick={() => navigate(`/reports/${r.id}`)}
+                    >
+                      <td className="py-2.5 pr-3 text-blue-400 font-mono whitespace-nowrap">{r.id}</td>
+                      <td className="py-2.5 pr-3">
+                        {r.detected_language && (
+                          <LanguageBadge language={r.detected_language} size="sm" />
+                        )}
+                      </td>
+                      <td className="py-2.5 pr-3 text-slate-400 max-w-xs">
+                        <p className="line-clamp-2">{r.original_report_text || r.report_text}</p>
+                      </td>
+                      <td className="py-2.5 pr-3 text-slate-200 max-w-xs">
+                        <p className="line-clamp-2">{r.translated_report_text || r.report_text}</p>
+                      </td>
+                      <td className="py-2.5 pr-3 whitespace-nowrap">
+                        {r.sif_potential && <SIFBadge potential={r.sif_potential} size="sm" />}
+                      </td>
+                      <td className="py-2.5 pr-3 whitespace-nowrap">
+                        {r.risk_level && <RiskBadge level={r.risk_level} size="sm" />}
+                      </td>
+                      <td className="py-2.5 whitespace-nowrap">
+                        <TranslationBadge
+                          isTranslated={r.is_translated ?? false}
+                          translationError={r.translation_error}
+                          method={r.translation_method}
+                          size="sm"
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {multilingualReports.length > 20 && (
+                <p className="text-xs text-slate-500 mt-3 text-center">
+                  Showing 20 of {multilingualReports.length} non-English reports.{' '}
+                  <button onClick={() => navigate('/reports')} className="text-blue-400 hover:text-blue-300">
+                    View all in Reports →
+                  </button>
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

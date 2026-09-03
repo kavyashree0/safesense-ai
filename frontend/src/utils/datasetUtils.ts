@@ -1,5 +1,6 @@
 import { DatasetInfo, DatasetQuality, ColumnMapping, SafetyReport } from '../types';
 import { analyzeReport, calculateRiskScore, detectLSR, detectBarrierFailure, determineSIFPotential } from './riskEngine';
+import { processDataset, TranslationResult } from './multilingualUtils';
 
 // ─── Column auto-detection ────────────────────────────────────────────────────
 const COLUMN_HINTS: Record<keyof ColumnMapping, string[]> = {
@@ -15,6 +16,13 @@ const COLUMN_HINTS: Record<keyof ColumnMapping, string[]> = {
   recommended_action: ['recommendation', 'action', 'corrective', 'recommended_action', 'remedy'],
   life_saving_rule: ['rule', 'lsr', 'life_saving_rule', 'safety_rule', 'critical_rule'],
 };
+
+/** Detect the optional 'language' hint column in uploaded data */
+function detectLanguageColumn(columns: string[]): string | undefined {
+  const lower = columns.map(c => c.toLowerCase().trim());
+  const idx = lower.findIndex(c => c === 'language' || c === 'lang' || c === 'detected_language');
+  return idx !== -1 ? columns[idx] : undefined;
+}
 
 export function detectColumnMapping(columns: string[]): ColumnMapping {
   const mapping: ColumnMapping = {};
@@ -132,55 +140,109 @@ export function analyzeDatasetQuality(
   };
 }
 
-// ─── Convert raw rows to SafetyReport[] ──────────────────────────────────────
+// ─── Convert raw rows to SafetyReport[] (with multilingual support) ───────────
+/**
+ * Convert raw CSV/Excel rows to typed SafetyReport objects.
+ *
+ * Multilingual pipeline (runs automatically):
+ *   1. Detect language for every report_text value
+ *   2. Translate Kannada/Hindi → English using client-side dictionary
+ *   3. Use the translated English text for risk scoring and LSR detection
+ *   4. Preserve original_report_text and translated_report_text on every report
+ *
+ * If translateEnabled = false, only language detection runs (no translation).
+ */
 export function rowsToReports(
   rows: Record<string, unknown>[],
-  mapping: ColumnMapping
+  mapping: ColumnMapping,
+  translateEnabled = true
 ): SafetyReport[] {
+  // ── Extract all report texts and optional language hints ──────────────────
+  const langCol = detectLanguageColumn(Object.keys(rows[0] || {}));
+  const texts = rows.map(row =>
+    mapping.report_text ? String(row[mapping.report_text] || '') : ''
+  );
+  const hintLangs = langCol
+    ? rows.map(row => String(row[langCol] || '').trim() || undefined)
+    : undefined;
+
+  // ── Run multilingual pipeline on all texts at once ────────────────────────
+  const { results: mlResults } = processDataset(texts, hintLangs, translateEnabled);
+
   return rows.map((row, idx) => {
-    const text = mapping.report_text ? String(row[mapping.report_text] || '') : '';
-    const rawSIF = mapping.sif_label ? String(row[mapping.sif_label] || '').toUpperCase().trim() : undefined;
+    const ml: TranslationResult = mlResults[idx];
+
+    // The text fed into the existing NLP/risk engine is always English
+    // (translated if non-English, original if already English)
+    const analysisText = ml.translated_report_text || ml.original_report_text || '';
+
+    const rawSIF = mapping.sif_label
+      ? String(row[mapping.sif_label] || '').toUpperCase().trim()
+      : undefined;
     let sifPotential: 'YES' | 'NO' | 'UNKNOWN' | undefined;
     if (rawSIF) {
-      if (rawSIF === 'YES' || rawSIF === 'Y' || rawSIF === '1' || rawSIF === 'TRUE') sifPotential = 'YES';
-      else if (rawSIF === 'NO' || rawSIF === 'N' || rawSIF === '0' || rawSIF === 'FALSE') sifPotential = 'NO';
+      if (['YES', 'Y', '1', 'TRUE'].includes(rawSIF))  sifPotential = 'YES';
+      else if (['NO', 'N', '0', 'FALSE'].includes(rawSIF)) sifPotential = 'NO';
       else sifPotential = 'UNKNOWN';
     }
 
-    const severity = mapping.severity ? String(row[mapping.severity] || '') : undefined;
-    const lsr = mapping.life_saving_rule ? String(row[mapping.life_saving_rule] || '') : detectLSR(text);
-    const barrier = mapping.barrier_failure ? String(row[mapping.barrier_failure] || '') : detectBarrierFailure(text);
+    const severity = mapping.severity
+      ? String(row[mapping.severity] || '')
+      : undefined;
+
+    // LSR and barrier are detected from the English analysis text
+    const lsr = mapping.life_saving_rule
+      ? String(row[mapping.life_saving_rule] || '') || detectLSR(analysisText)
+      : detectLSR(analysisText);
+    const barrier = mapping.barrier_failure
+      ? String(row[mapping.barrier_failure] || '') || detectBarrierFailure(analysisText)
+      : detectBarrierFailure(analysisText);
 
     const partialReport = {
-      report_text: text,
+      report_text: analysisText,
       sif_potential: sifPotential,
       severity,
       life_saving_rule: lsr,
       barrier_failure: barrier,
-      report_type: mapping.report_type ? String(row[mapping.report_type] || 'Unknown') : 'Unknown',
-      activity: mapping.activity ? String(row[mapping.activity] || '') : undefined,
+      report_type: mapping.report_type
+        ? String(row[mapping.report_type] || 'Unknown')
+        : 'Unknown',
+      activity: mapping.activity
+        ? String(row[mapping.activity] || '')
+        : undefined,
     };
 
     const { score, level } = calculateRiskScore(partialReport);
-    const computedSIF = sifPotential || determineSIFPotential(text, score, lsr);
+    const computedSIF = sifPotential || determineSIFPotential(analysisText, score, lsr);
 
     return {
       id: `RPT-${String(idx + 1).padStart(4, '0')}`,
-      report_id: mapping.report_text ? `RPT-${String(idx + 1).padStart(4, '0')}` : String(idx + 1),
+      report_id: `RPT-${String(idx + 1).padStart(4, '0')}`,
       report_type: partialReport.report_type,
-      report_text: text,
-      activity: mapping.activity ? String(row[mapping.activity] || '') : undefined,
-      location: mapping.location ? String(row[mapping.location] || '') : undefined,
-      site: mapping.site ? String(row[mapping.site] || '') : undefined,
-      date: mapping.date ? String(row[mapping.date] || '') : undefined,
+      // report_text is the English text used for analysis
+      report_text: analysisText,
+      activity:  mapping.activity  ? String(row[mapping.activity]  || '') : undefined,
+      location:  mapping.location  ? String(row[mapping.location]  || '') : undefined,
+      site:      mapping.site      ? String(row[mapping.site]       || '') : undefined,
+      date:      mapping.date      ? String(row[mapping.date]       || '') : undefined,
       severity,
-      sif_potential: computedSIF,
-      risk_level: level,
-      risk_score: score,
+      sif_potential:    computedSIF,
+      risk_level:       level,
+      risk_score:       score,
       life_saving_rule: lsr,
-      barrier_failure: barrier,
-      recommended_action: mapping.recommended_action ? String(row[mapping.recommended_action] || '') : undefined,
+      barrier_failure:  barrier,
+      recommended_action: mapping.recommended_action
+        ? String(row[mapping.recommended_action] || '')
+        : undefined,
       analyzed: true,
+      // ── Multilingual fields ──────────────────────────────────────────────
+      original_report_text:   ml.original_report_text,
+      detected_language:      ml.detected_language,
+      detected_language_name: ml.detected_language_name,
+      translated_report_text: ml.translated_report_text,
+      translation_method:     ml.translation_method,
+      translation_error:      ml.translation_error,
+      is_translated:          ml.is_translated,
     };
   });
 }

@@ -4,6 +4,45 @@ export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type SIFPotential = 'YES' | 'NO' | 'UNKNOWN';
 export type ReportType = 'Unsafe Act' | 'Unsafe Condition' | 'Near Miss' | 'Incident';
 
+// ─── Multilingual Types ───────────────────────────────────────────────────────
+export type DetectedLanguage = 'en' | 'kn' | 'hi' | 'unknown';
+
+export const LANGUAGE_DISPLAY: Record<DetectedLanguage, string> = {
+  en: 'English',
+  kn: 'Kannada',
+  hi: 'Hindi',
+  unknown: 'Unknown',
+};
+
+export const LANGUAGE_FLAG: Record<DetectedLanguage, string> = {
+  en: '🇬🇧',
+  kn: '🇮🇳',
+  hi: '🇮🇳',
+  unknown: '❓',
+};
+
+export interface MultilingualStats {
+  total: number;
+  english: number;
+  kannada: number;
+  hindi: number;
+  unknown: number;
+  translated: number;
+  translation_errors: number;
+  translate_enabled: boolean;
+}
+
+export const EMPTY_MULTILINGUAL_STATS: MultilingualStats = {
+  total: 0,
+  english: 0,
+  kannada: 0,
+  hindi: 0,
+  unknown: 0,
+  translated: 0,
+  translation_errors: 0,
+  translate_enabled: true,
+};
+
 export interface SafetyReport {
   id: string;
   report_id?: string;
@@ -24,6 +63,14 @@ export interface SafetyReport {
   analysis?: ReportAnalysis;
   reviewer_status?: 'Pending' | 'Confirmed' | 'Corrected' | 'Rejected';
   reviewer_comment?: string;
+  // ─── Multilingual fields ──────────────────────────────────────────────────
+  original_report_text?: string;       // Raw text in original language
+  detected_language?: DetectedLanguage; // 'en' | 'kn' | 'hi' | 'unknown'
+  detected_language_name?: string;     // Display name e.g. "Kannada"
+  translated_report_text?: string;     // English translation (used by ML model)
+  translation_method?: string;         // 'passthrough' | 'deep_translator' | 'offline_dict'
+  translation_error?: string | null;   // Error message or null
+  is_translated?: boolean;             // True if translation was applied
 }
 
 export interface ReportAnalysis {

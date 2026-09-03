@@ -10,3 +10,11 @@ passlib[bcrypt]==1.7.4
 python-dotenv==1.0.0
 aiofiles==23.2.1
 openpyxl==3.1.2
+
+# ─── Multilingual support ────────────────────────────────────────────────────
+# Language detection (no API key required)
+langdetect==1.0.9
+
+# Translation (uses Google Translate via free API — no key for basic use)
+# Swap for IndicTrans2 or another offline model in production
+deep-translator==1.11.4

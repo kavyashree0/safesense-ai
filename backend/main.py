@@ -1,7 +1,7 @@
 """
 SafeSense AI — FastAPI Backend
 Provides REST API endpoints for safety report analysis, risk scoring,
-pattern detection, and safety intelligence.
+pattern detection, safety intelligence, and multilingual processing.
 """
 from fastapi import FastAPI, HTTPException, UploadFile, File, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,18 +17,25 @@ from datetime import datetime
 from services.risk_engine import analyze_report, calculate_risk_score, compute_patterns, compute_site_risk
 from services.auth import create_access_token, verify_token
 from services.report_generator import generate_summary_report
+from services.multilingual import process_report, process_dataset, LANG_DISPLAY
 
 app = FastAPI(
     title="SafeSense AI API",
-    description="AI-powered industrial safety intelligence platform API",
-    version="1.0.0",
+    description="AI-powered industrial safety intelligence platform API with multilingual support (EN/KN/HI)",
+    version="1.1.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
 )
 
+import os
+_allowed_origins = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:3000,http://localhost:5173"
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -170,10 +177,113 @@ async def copilot_query(req: CopilotRequest):
         "source_reports": [],
     }
 
+# ─── Multilingual: Detect Language ───────────────────────────────────────────
+class DetectLanguageRequest(BaseModel):
+    text: str
+    hint_language: Optional[str] = None
+
+@app.post("/api/detect-language")
+async def detect_language(req: DetectLanguageRequest):
+    """
+    Detect the language of a safety report text.
+    Returns: detected_language code and display name.
+    Supports: English (en), Kannada (kn), Hindi (hi).
+    """
+    if not req.text or not req.text.strip():
+        raise HTTPException(status_code=400, detail="Text is required")
+    result = process_report(req.text, req.hint_language)
+    return {
+        "detected_language":      result["detected_language"],
+        "detected_language_name": result["detected_language_name"],
+        "original_text":          req.text,
+    }
+
+# ─── Multilingual: Translate ──────────────────────────────────────────────────
+class TranslateRequest(BaseModel):
+    text: str
+    source_language: Optional[str] = None  # 'en', 'kn', 'hi', or None for auto-detect
+    preserve_original: bool = True
+
+@app.post("/api/translate")
+async def translate_report(req: TranslateRequest):
+    """
+    Translate a safety report to English and return both original and translated text.
+    The existing NLP model always receives the translated English text.
+
+    Privacy note: Translation is performed server-side. Do not send sensitive
+    production data to this endpoint if using an external translation provider.
+    See TRANSLATION_PROVIDER in .env to switch to offline mode.
+    """
+    if not req.text or not req.text.strip():
+        raise HTTPException(status_code=400, detail="Text is required")
+
+    result = process_report(req.text, req.source_language)
+
+    # Also run the existing risk analysis on the translated English text
+    analysis = analyze_report({"report_text": result["translated_report_text"]})
+
+    return {
+        "original_report_text":   result["original_report_text"],
+        "detected_language":      result["detected_language"],
+        "detected_language_name": result["detected_language_name"],
+        "translated_report_text": result["translated_report_text"],
+        "translation_method":     result["translation_method"],
+        "translation_error":      result["translation_error"],
+        "is_translated":          result["is_translated"],
+        # Analysis runs on the English translation
+        "sif_potential":          analysis["sif_potential"],
+        "risk_level":             analysis["risk_level"],
+        "risk_score":             analysis["risk_score"],
+        "life_saving_rule":       analysis["life_saving_rule"],
+        "barrier_failure":        analysis["barrier_failure"],
+        "evidence_phrases":       analysis["evidence_phrases"],
+        "explanation":            analysis["explanation"],
+    }
+
+# ─── Multilingual: Process Dataset ───────────────────────────────────────────
+class MultilingualDatasetRequest(BaseModel):
+    rows: List[Dict[str, Any]]
+    text_col: str = "report_text"
+    lang_col: Optional[str] = None
+
+@app.post("/api/multilingual/process-dataset")
+async def process_multilingual_dataset(req: MultilingualDatasetRequest):
+    """
+    Process all rows through multilingual pipeline:
+    1. Detect language per row
+    2. Translate non-English reports to English
+    3. Return enriched rows + language statistics
+
+    The translated text replaces report_text for downstream ML analysis.
+    Original text is preserved in original_report_text.
+    """
+    if not req.rows:
+        raise HTTPException(status_code=400, detail="rows list is required")
+    if len(req.rows) > 5000:
+        raise HTTPException(status_code=400, detail="Maximum 5000 rows per request")
+
+    enriched_rows, stats = process_dataset(req.rows, req.text_col, req.lang_col)
+    return {
+        "enriched_rows": enriched_rows,
+        "stats": stats,
+        "message": (
+            f"Processed {stats['total']} reports: "
+            f"{stats['english']} English, "
+            f"{stats['kannada']} Kannada, "
+            f"{stats['hindi']} Hindi, "
+            f"{stats['translated']} translated."
+        ),
+    }
+
 # ─── Health check ─────────────────────────────────────────────────────────────
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "service": "SafeSense AI API", "version": "1.0.0"}
+    return {
+        "status": "ok",
+        "service": "SafeSense AI API",
+        "version": "1.1.0",
+        "features": ["risk-analysis", "multilingual-en-kn-hi"],
+    }
 
 if __name__ == "__main__":
     import uvicorn
