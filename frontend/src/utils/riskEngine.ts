@@ -475,39 +475,211 @@ function mostCommon(arr: string[]): string {
 }
 
 export function computePatterns(reports: SafetyReport[]) {
-  const patternMap: Record<string, SafetyReport[]> = {};
-  for (const r of reports) {
-    const lsr = r.life_saving_rule || detectLSR(r.report_text || '');
-    const barrier = r.barrier_failure || detectBarrierFailure(r.report_text || '');
-    if (lsr !== 'General Safety' && barrier !== 'Unknown Barrier Failure') {
-      const key = `${lsr} + ${barrier}`;
-      if (!patternMap[key]) patternMap[key] = [];
-      patternMap[key].push(r);
+  if (!reports.length) return [];
+
+  const total = reports.length;
+
+  // ── Step 1: Enrich every report with resolved LSR, barrier, activity ───────
+  const enriched = reports.map(r => {
+    const text = r.report_text || '';
+    const lsr      = (r.life_saving_rule && r.life_saving_rule !== 'General Safety')
+                      ? r.life_saving_rule
+                      : detectLSR(text);
+    const barrier  = (r.barrier_failure && r.barrier_failure !== 'Unknown Barrier Failure')
+                      ? r.barrier_failure
+                      : detectBarrierFailure(text);
+    const activity = r.activity || detectActivity(text);
+    const site     = r.site     || r.location || 'Unknown';
+    const sif      = r.sif_potential === 'YES';
+    const severity = (r.severity || r.risk_level || '').toLowerCase();
+    return { ...r, _lsr: lsr, _barrier: barrier, _activity: activity, _site: site, _sif: sif, _severity: severity };
+  });
+
+  // ── Step 2: Build pattern buckets using multiple key combinations ─────────
+  // We try 4 key strategies from most-specific to least-specific so every
+  // dataset produces meaningful patterns regardless of which columns exist.
+
+  interface PatternBucket {
+    key: string;
+    name: string;
+    description: string;
+    reports: typeof enriched;
+    keyType: string;
+  }
+
+  const buckets: Record<string, PatternBucket> = {};
+
+  function addToBucket(key: string, name: string, description: string, keyType: string, r: typeof enriched[0]) {
+    if (!buckets[key]) buckets[key] = { key, name, description, reports: [], keyType };
+    buckets[key].reports.push(r);
+  }
+
+  for (const r of enriched) {
+    const { _lsr, _barrier, _activity, _site } = r;
+    const hasLSR     = _lsr     !== 'General Safety';
+    const hasBarrier = _barrier !== 'Unknown Barrier Failure';
+    const hasAct     = _activity && _activity !== 'Unknown' && _activity !== 'General Maintenance';
+    const hasSite    = _site && _site !== 'Unknown';
+
+    // Strategy A: LSR + Barrier (most precise — matches original logic but now min=1)
+    if (hasLSR && hasBarrier) {
+      addToBucket(
+        `A::${_lsr}::${_barrier}`,
+        `${_lsr} — ${_barrier}`,
+        `Reports where ${_lsr} rules were violated due to "${_barrier}".`,
+        'LSR + Barrier Failure',
+        r
+      );
+    }
+
+    // Strategy B: Activity + Barrier
+    if (hasAct && hasBarrier) {
+      addToBucket(
+        `B::${_activity}::${_barrier}`,
+        `${_activity} — ${_barrier}`,
+        `Reports of "${_barrier}" occurring during ${_activity} operations.`,
+        'Activity + Barrier Failure',
+        r
+      );
+    }
+
+    // Strategy C: LSR + Activity
+    if (hasLSR && hasAct) {
+      addToBucket(
+        `C::${_lsr}::${_activity}`,
+        `${_lsr} precursor in ${_activity}`,
+        `Recurring ${_lsr} safety violations in ${_activity} activities.`,
+        'LSR + Activity',
+        r
+      );
+    }
+
+    // Strategy D: LSR + Site (only when site data exists)
+    if (hasLSR && hasSite && _site !== 'Unknown') {
+      addToBucket(
+        `D::${_lsr}::${_site}`,
+        `${_lsr} issues at ${_site}`,
+        `Repeated ${_lsr} precursors reported at ${_site}.`,
+        'LSR + Site',
+        r
+      );
+    }
+
+    // Strategy E: SIF potential + LSR (captures SIF-flagged clusters)
+    if (r._sif && hasLSR) {
+      addToBucket(
+        `E::SIF::${_lsr}`,
+        `SIF Potential — ${_lsr}`,
+        `Reports with SIF potential linked to ${_lsr} life-saving rule.`,
+        'SIF + LSR',
+        r
+      );
+    }
+
+    // Strategy F: Barrier-only (fallback — groups all instances of a barrier failure)
+    if (hasBarrier) {
+      addToBucket(
+        `F::${_barrier}`,
+        `Recurring: ${_barrier}`,
+        `Multiple reports with the same failed safety barrier: "${_barrier}".`,
+        'Barrier Failure Only',
+        r
+      );
+    }
+
+    // Strategy G: Activity-only (fallback — groups high-risk activity recurrences)
+    if (hasAct) {
+      addToBucket(
+        `G::${_activity}`,
+        `High-Risk Activity: ${_activity}`,
+        `Cluster of safety observations during ${_activity} operations.`,
+        'Activity Only',
+        r
+      );
     }
   }
-  return Object.entries(patternMap)
-    .filter(([, rs]) => rs.length >= 2)
-    .map(([name, rs], idx) => {
-      const sites = [...new Set(rs.map(r => r.site).filter(Boolean))] as string[];
-      const activities = [...new Set(rs.map(r => r.activity).filter(Boolean))] as string[];
-      const sifCount = rs.filter(r => r.sif_potential === 'YES').length;
+
+  // ── Step 3: Score and filter buckets ──────────────────────────────────────
+  // Dynamic minimum frequency: at least 2 reports OR 5% of dataset (whichever smaller)
+  const minFreq = Math.max(2, Math.floor(total * 0.03));
+
+  const scored = Object.values(buckets)
+    .filter(b => b.reports.length >= minFreq)
+    .map((b, idx) => {
+      const rs = b.reports;
+      const freq = rs.length;
+      const pct  = Math.round((freq / total) * 100);
+      const sifCount  = rs.filter(r => r._sif).length;
+      const sifPct    = freq > 0 ? sifCount / freq : 0;
+      const critCount = rs.filter(r => r._severity.includes('critical')).length;
+
+      // Risk level based on SIF concentration
       let riskLevel: RiskLevel = 'LOW';
-      if (sifCount / rs.length > 0.7) riskLevel = 'CRITICAL';
-      else if (sifCount / rs.length > 0.4) riskLevel = 'HIGH';
-      else if (sifCount / rs.length > 0.1) riskLevel = 'MEDIUM';
+      if (sifPct > 0.65 || critCount / freq > 0.6) riskLevel = 'CRITICAL';
+      else if (sifPct > 0.35 || critCount / freq > 0.35) riskLevel = 'HIGH';
+      else if (sifPct > 0.1  || critCount / freq > 0.1)  riskLevel = 'MEDIUM';
+
+      // Trend: detect if frequency is above-average for this key type
+      const trend: 'increasing' | 'stable' | 'decreasing' =
+        pct > 20 ? 'increasing' : pct > 8 ? 'stable' : 'stable';
+
+      const sites      = [...new Set(rs.map(r => r._site).filter(s => s && s !== 'Unknown'))] as string[];
+      const activities = [...new Set(rs.map(r => r._activity).filter(a => a && a !== 'Unknown' && a !== 'General Maintenance'))] as string[];
+      const lsrs       = [...new Set(rs.map(r => r._lsr).filter(l => l !== 'General Safety'))] as string[];
+      const barriers   = [...new Set(rs.map(r => r._barrier).filter(br => br !== 'Unknown Barrier Failure'))] as string[];
+
+      // Compute a sort score — prioritise specificity (Strategy A/B) + SIF count + frequency
+      const strategyBonus = b.keyType === 'LSR + Barrier Failure' ? 1000
+        : b.keyType === 'Activity + Barrier Failure' ? 900
+        : b.keyType === 'SIF + LSR' ? 850
+        : b.keyType === 'LSR + Activity' ? 800
+        : b.keyType === 'LSR + Site' ? 700
+        : b.keyType === 'Barrier Failure Only' ? 500
+        : 300;
+
+      const sortScore = strategyBonus + sifCount * 20 + freq * 5;
+
       return {
-        id: `PAT-${idx + 1}`,
-        name,
-        frequency: rs.length,
-        risk_level: riskLevel,
+        id: `PAT-${String(idx + 1).padStart(3, '0')}`,
+        name:        b.name,
+        description: b.description,
+        key_type:    b.keyType,
+        frequency:   freq,
+        percentage:  pct,
+        risk_level:  riskLevel,
+        sif_count:   sifCount,
+        sif_percentage: Math.round(sifPct * 100),
         sites,
         activities,
-        trend: 'stable' as const,
-        description: `Recurring pattern: ${name}. Found in ${rs.length} reports across ${sites.length} site(s).`,
+        lsrs,
+        barriers,
+        trend,
         report_ids: rs.map(r => r.id),
+        _sortScore: sortScore,
       };
-    })
-    .sort((a, b) => b.frequency - a.frequency);
+    });
+
+  // ── Step 4: De-duplicate — remove lower-priority patterns that cover the
+  //    same report set as a higher-priority one (> 80% overlap) ───────────────
+  scored.sort((a, b) => b._sortScore - a._sortScore);
+
+  const deduplicated: typeof scored = [];
+  for (const candidate of scored) {
+    const candidateSet = new Set(candidate.report_ids);
+    const isDuplicate = deduplicated.some(existing => {
+      const existingSet = new Set(existing.report_ids);
+      const intersection = candidate.report_ids.filter(id => existingSet.has(id)).length;
+      const overlap = intersection / Math.min(candidateSet.size, existingSet.size);
+      return overlap > 0.80;
+    });
+    if (!isDuplicate) deduplicated.push(candidate);
+    if (deduplicated.length >= 20) break; // cap at 20 patterns
+  }
+
+  // Final sort: SIF count desc, then frequency desc
+  return deduplicated
+    .sort((a, b) => b.sif_count - a.sif_count || b.frequency - a.frequency)
+    .map((p, i) => ({ ...p, id: `PAT-${String(i + 1).padStart(3, '0')}` }));
 }
 
 export function computeEarlyWarnings(reports: SafetyReport[]) {
