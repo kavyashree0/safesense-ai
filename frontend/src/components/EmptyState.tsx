@@ -44,12 +44,12 @@ export default function EmptyState({
   }
 
   return (
-    <div className="flex flex-col items-center justify-center py-20 px-6 text-center">
-      <div className="w-20 h-20 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center mb-5">
-        <Database className="w-9 h-9 text-slate-500" />
+    <div className="flex flex-col items-center justify-center py-20 px-6 text-center card bg-white border border-slate-200/80 shadow-soft max-w-xl mx-auto my-12">
+      <div className="w-20 h-20 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center mb-5 shadow-xs">
+        <Database className="w-9 h-9 text-indigo-600" />
       </div>
-      <h3 className="text-xl font-bold text-white mb-2">{title}</h3>
-      <p className="text-slate-400 max-w-md mb-8 text-sm leading-relaxed">{message}</p>
+      <h3 className="text-xl font-bold text-slate-900 mb-2 tracking-tight">{title}</h3>
+      <p className="text-slate-500 max-w-md mb-8 text-sm leading-relaxed">{message}</p>
       {showActions && (
         <div className="flex flex-col sm:flex-row gap-3">
           <button onClick={() => navigate('/upload')} className="btn-primary">
@@ -57,7 +57,7 @@ export default function EmptyState({
             Upload Dataset
           </button>
           <button onClick={loadDemo} className="btn-secondary">
-            <Database className="w-4 h-4" />
+            <Database className="w-4 h-4 text-indigo-600" />
             Use Demo Dataset
           </button>
         </div>

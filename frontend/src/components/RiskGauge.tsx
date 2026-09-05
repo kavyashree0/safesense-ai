@@ -13,10 +13,10 @@ export default function RiskGauge({ score, size = 120, showLabel = true }: RiskG
   const offset = arcLength - (clampedScore / 100) * arcLength;
 
   const getColor = (s: number) => {
-    if (s > 80) return '#ef4444';
-    if (s > 60) return '#f97316';
-    if (s > 30) return '#eab308';
-    return '#22c55e';
+    if (s > 80) return '#EF4444';
+    if (s > 60) return '#F97316';
+    if (s > 30) return '#F59E0B';
+    return '#22C55E';
   };
 
   const getLevel = (s: number) => {
@@ -38,7 +38,7 @@ export default function RiskGauge({ score, size = 120, showLabel = true }: RiskG
           cy={size / 2}
           r={radius}
           fill="none"
-          stroke="#1e293b"
+          stroke="#E2E8F0"
           strokeWidth="10"
           strokeLinecap="round"
           strokeDasharray={`${arcLength} ${circumference}`}
@@ -65,7 +65,7 @@ export default function RiskGauge({ score, size = 120, showLabel = true }: RiskG
           y={size / 2 + 2}
           textAnchor="middle"
           dominantBaseline="middle"
-          fill={color}
+          fill="#0F172A"
           fontSize={size * 0.22}
           fontWeight="bold"
           fontFamily="system-ui, sans-serif"
@@ -77,8 +77,9 @@ export default function RiskGauge({ score, size = 120, showLabel = true }: RiskG
           y={size / 2 + size * 0.18}
           textAnchor="middle"
           dominantBaseline="middle"
-          fill="#64748b"
+          fill="#94A3B8"
           fontSize={size * 0.1}
+          fontWeight="600"
           fontFamily="system-ui, sans-serif"
         >
           /100
@@ -86,8 +87,12 @@ export default function RiskGauge({ score, size = 120, showLabel = true }: RiskG
       </svg>
       {showLabel && (
         <span
-          className="text-xs font-bold uppercase tracking-widest"
-          style={{ color }}
+          className="text-xs font-bold uppercase tracking-widest px-2 py-0.5 rounded-full"
+          style={{ 
+            color,
+            backgroundColor: `${color}15`,
+            border: `1px solid ${color}30`
+          }}
         >
           {level}
         </span>

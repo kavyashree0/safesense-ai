@@ -40,54 +40,52 @@ export default function RiskIntelligencePage() {
   if (!dataset) return <div className="p-6"><EmptyState /></div>;
 
   return (
-    <div className="p-6 space-y-6 animate-in">
+    <div className="p-6 space-y-6 animate-in bg-[#F8FAFC]">
       <div>
         <h1 className="section-title">Risk Intelligence</h1>
-        <p className="section-sub">Early warnings, barrier failures, and risk trends across your safety dataset.</p>
+        <p className="section-sub mb-0">Early warnings, barrier failures, and risk trends across your safety dataset.</p>
       </div>
 
       {/* Early Warnings */}
       <section>
-        <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 text-red-400" /> Early Warning Center
+        <h2 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-3 flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 text-red-500" /> Early Warning Center
         </h2>
         {warnings.length === 0 ? (
           <div className="card text-slate-500 text-sm">No active warnings detected in the current dataset.</div>
         ) : (
           <div className="grid sm:grid-cols-2 gap-4">
             {warnings.map(w => (
-              <div key={w.id} className={`card border ${
-                w.type === 'CRITICAL' ? 'border-red-500/30 bg-red-900/5' :
-                w.type === 'WARNING' ? 'border-orange-500/30 bg-orange-900/5' :
-                'border-yellow-500/30 bg-yellow-900/5'
+              <div key={w.id} className={`card border hover:shadow-soft-md transition-all ${
+                w.type === 'CRITICAL' ? 'border-red-200 bg-red-50/40 border-t-4 border-t-red-500' :
+                w.type === 'WARNING' ? 'border-orange-200 bg-orange-50/40 border-t-4 border-t-orange-500' :
+                'border-amber-200 bg-amber-50/40 border-t-4 border-t-amber-500'
               }`}>
-                <div className="flex items-start gap-3">
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                    w.type === 'CRITICAL' ? 'bg-red-600/20' : w.type === 'WARNING' ? 'bg-orange-600/20' : 'bg-yellow-600/20'
+                <div className="flex items-start gap-3.5">
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 shadow-xs ${
+                    w.type === 'CRITICAL' ? 'bg-red-100 text-red-600' : w.type === 'WARNING' ? 'bg-orange-100 text-orange-600' : 'bg-amber-100 text-amber-600'
                   }`}>
-                    <AlertTriangle className={`w-4 h-4 ${
-                      w.type === 'CRITICAL' ? 'text-red-400' : w.type === 'WARNING' ? 'text-orange-400' : 'text-yellow-400'
-                    }`} />
+                    <AlertTriangle className="w-5 h-5" />
                   </div>
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className={`text-xs font-bold uppercase tracking-widest ${
-                        w.type === 'CRITICAL' ? 'text-red-400' : w.type === 'WARNING' ? 'text-orange-400' : 'text-yellow-400'
+                      <span className={`text-[11px] font-bold uppercase tracking-wider ${
+                        w.type === 'CRITICAL' ? 'text-red-700' : w.type === 'WARNING' ? 'text-orange-700' : 'text-amber-700'
                       }`}>{w.type}</span>
                     </div>
-                    <p className="font-semibold text-white text-sm">{w.title}</p>
-                    <p className="text-slate-400 text-xs mt-1">{w.description}</p>
+                    <p className="font-bold text-slate-900 text-sm">{w.title}</p>
+                    <p className="text-slate-600 text-xs mt-1 leading-relaxed">{w.description}</p>
                     {w.affected_sites.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-1">
+                      <div className="mt-2.5 flex flex-wrap gap-1">
                         {w.affected_sites.slice(0, 3).map(site => (
-                          <span key={site} className="text-xs bg-slate-700 text-slate-300 px-2 py-0.5 rounded">{site}</span>
+                          <span key={site} className="text-xs bg-white text-slate-700 font-medium px-2 py-0.5 rounded-md border border-slate-200/80 shadow-2xs">{site}</span>
                         ))}
                       </div>
                     )}
                   </div>
                   <div className="text-right flex-shrink-0">
-                    <div className="text-lg font-bold text-green-400">+{w.change_pct}%</div>
-                    <div className="text-xs text-slate-500">vs prev period</div>
+                    <div className="text-lg font-bold text-red-600">+{w.change_pct}%</div>
+                    <div className="text-[11px] text-slate-400 font-medium">vs prev period</div>
                   </div>
                 </div>
               </div>
@@ -99,27 +97,27 @@ export default function RiskIntelligencePage() {
       {/* Trend chart */}
       {monthlyData.length > 0 ? (
         <section>
-          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-2">
-            <TrendingUp className="w-4 h-4 text-blue-400" /> Monthly Safety Trend
+          <h2 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-3 flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-indigo-600" /> Monthly Safety Trend
           </h2>
-          <div className="card">
+          <div className="card shadow-soft">
             <ResponsiveContainer width="100%" height={260}>
               <LineChart data={monthlyData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                <XAxis dataKey="month" tick={{ fill: '#64748b', fontSize: 10 }} />
-                <YAxis tick={{ fill: '#64748b', fontSize: 10 }} />
-                <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8, color: '#f1f5f9' }} />
-                <Legend formatter={v => <span style={{ color: '#94a3b8', fontSize: 11 }}>{v}</span>} />
-                <Line type="monotone" dataKey="total" stroke="#3b82f6" name="Total Reports" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="sif" stroke="#ef4444" name="SIF Potential" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="critical" stroke="#f97316" name="Critical" strokeWidth={2} dot={{ r: 3 }} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                <XAxis dataKey="month" tick={{ fill: '#64748B', fontSize: 10 }} />
+                <YAxis tick={{ fill: '#64748B', fontSize: 10 }} />
+                <Tooltip />
+                <Legend />
+                <Line type="monotone" dataKey="total" stroke="#4F46E5" name="Total Reports" strokeWidth={2.5} dot={{ r: 4, fill: '#4F46E5' }} />
+                <Line type="monotone" dataKey="sif" stroke="#EF4444" name="SIF Potential" strokeWidth={2.5} dot={{ r: 4, fill: '#EF4444' }} />
+                <Line type="monotone" dataKey="critical" stroke="#F97316" name="Critical Risk" strokeWidth={2} dot={{ r: 3, fill: '#F97316' }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
         </section>
       ) : (
         <div className="card text-slate-500 text-sm flex items-center gap-2">
-          <Activity className="w-4 h-4" />
+          <Activity className="w-4 h-4 text-slate-400" />
           Trend analysis requires a date column. Not available in the current dataset.
         </div>
       )}
@@ -127,17 +125,17 @@ export default function RiskIntelligencePage() {
       {/* LSR breakdown */}
       <div className="grid lg:grid-cols-2 gap-5">
         <section>
-          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wide mb-3">Life-Saving Rule Distribution</h2>
-          <div className="card">
+          <h2 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-3">Life-Saving Rule Distribution</h2>
+          <div className="card shadow-soft">
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={lsrData} layout="vertical" margin={{ left: 10, right: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                <XAxis type="number" tick={{ fill: '#64748b', fontSize: 10 }} />
-                <YAxis type="category" dataKey="name" width={130} tick={{ fill: '#94a3b8', fontSize: 9 }} />
-                <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8, color: '#f1f5f9' }} />
-                <Legend formatter={v => <span style={{ color: '#94a3b8', fontSize: 11 }}>{v}</span>} />
-                <Bar dataKey="total" fill="#3b82f6" name="Total" radius={[0, 3, 3, 0]} />
-                <Bar dataKey="sif" fill="#ef4444" name="SIF Potential" radius={[0, 3, 3, 0]} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                <XAxis type="number" tick={{ fill: '#64748B', fontSize: 10 }} />
+                <YAxis type="category" dataKey="name" width={130} tick={{ fill: '#475569', fontSize: 10 }} />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="total" fill="#4F46E5" name="Total" radius={[0, 4, 4, 0]} />
+                <Bar dataKey="sif" fill="#EF4444" name="SIF Potential" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -145,18 +143,18 @@ export default function RiskIntelligencePage() {
 
         {/* Barrier Failures */}
         <section>
-          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wide mb-3">Failed Safety Barriers</h2>
-          <div className="card">
+          <h2 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-3">Failed Safety Barriers</h2>
+          <div className="card shadow-soft">
             <div className="space-y-3">
               {barriers.slice(0, 8).map(b => (
                 <div key={b.barrier}>
-                  <div className="flex justify-between text-xs mb-1">
-                    <span className="text-slate-300 truncate flex-1 mr-2">{b.barrier}</span>
-                    <span className="text-slate-400 flex-shrink-0">{b.count} ({b.percentage}%)</span>
+                  <div className="flex justify-between text-xs font-medium mb-1.5">
+                    <span className="text-slate-800 truncate flex-1 mr-2">{b.barrier}</span>
+                    <span className="text-slate-500 flex-shrink-0 font-semibold">{b.count} ({b.percentage}%)</span>
                   </div>
-                  <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                     <div
-                      className="h-full rounded-full bg-red-500 transition-all duration-700"
+                      className="h-full rounded-full bg-gradient-to-r from-red-500 to-rose-400 transition-all duration-700"
                       style={{ width: `${b.percentage}%` }}
                     />
                   </div>

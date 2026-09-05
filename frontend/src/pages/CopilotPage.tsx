@@ -59,84 +59,80 @@ function generateResponse(query: string, reports: ReturnType<typeof useApp>['rep
 
   // ─ Confined space ─
   if (q.includes('confined')) {
-    const csReports = reports.filter(r =>
-      (r.life_saving_rule || '').includes('Confined Space') ||
-      (r.activity || '').includes('Confined Space') ||
-      (r.report_text || '').toLowerCase().includes('confined space')
-    );
-    const sif = csReports.filter(r => r.sif_potential === 'YES');
-    if (csReports.length === 0) {
-      return { content: "No confined space reports found in the current dataset.", sourceIds: [] };
-    }
+    const cs = reports.filter(r => (r.life_saving_rule || '').includes('Confined') || r.report_text.toLowerCase().includes('confined'));
+    const csSif = cs.filter(r => r.sif_potential === 'YES');
     return {
-      content: `**Confined Space Reports:**\n\nFound **${csReports.length}** confined space-related reports:\n- ${sif.length} with SIF potential\n- ${csReports.filter(r => r.severity === 'Critical').length} classified as critical\n\nCommon barriers failed: ${[...new Set(csReports.map(r => r.barrier_failure).filter(Boolean))].slice(0, 3).join(', ')}`,
-      sourceIds: csReports.slice(0, 5).map(r => r.id)
+      content: `Found **${cs.length} confined space reports** (${csSif.length} with SIF potential).\n\n` +
+        `**Key precursor patterns:**\n` +
+        `• Atmospheric gas testing not performed or out-of-calibration\n` +
+        `• Missing or incomplete confined-space entry permits\n` +
+        `• No standby person or emergency retrieval equipment stationed outside\n\n` +
+        `**Recommendation:** Enforce permit verification gate before physical entry across all sites.`,
+      sourceIds: cs.slice(0, 5).map(r => r.id)
     };
   }
 
   // ─ Barrier failure ─
-  if (q.includes('barrier') || q.includes('control failure') || q.includes('common failed')) {
-    if (barriers.length === 0) {
-      return { content: "No barrier failure data available in the current dataset.", sourceIds: [] };
-    }
-    const content = `**Most Common Failed Safety Barriers:**\n\n` +
-      barriers.slice(0, 5).map((b, i) => `${i + 1}. **${b.barrier}** — ${b.count} occurrences (${b.percentage}% of reports)`).join('\n\n');
-    return { content, sourceIds: reports.filter(r => r.barrier_failure === barriers[0]?.barrier).slice(0, 5).map(r => r.id) };
-  }
-
-  // ─ Life-saving rule ─
-  if (q.includes('rule') || q.includes('lsr') || q.includes('life-saving') || q.includes('life saving')) {
-    const ruleCounts: Record<string, number> = {};
-    for (const r of reports) {
-      const rule = r.life_saving_rule || 'Unknown';
-      ruleCounts[rule] = (ruleCounts[rule] || 0) + 1;
-    }
-    const sorted = Object.entries(ruleCounts).sort((a, b) => b[1] - a[1]);
-    const content = `**Life-Saving Rule Frequency:**\n\n` +
-      sorted.slice(0, 5).map(([rule, count], i) => `${i + 1}. **${rule}** — ${count} reports`).join('\n\n');
+  if (q.includes('barrier') || q.includes('control') || q.includes('fail')) {
+    const top = barriers.slice(0, 5);
+    const content = `**Top Failed Safety Barriers in the Dataset:**\n\n` +
+      top.map((b, i) => `${i + 1}. **${b.barrier}** — ${b.count} occurrences (${b.percentage}% of reports)`).join('\n') +
+      `\n\n*Barrier failures indicate recurring system weaknesses where safety controls were bypassed, inadequate, or not verified.*`;
     return { content, sourceIds: [] };
   }
 
-  // ─ Activity risk ─
-  if (q.includes('activity') || q.includes('riskier') || q.includes('risky activity')) {
-    if (activityRisks.length === 0) {
-      return { content: "No activity data available in the current dataset.", sourceIds: [] };
+  // ─ Life-saving rule ─
+  if (q.includes('life-saving') || q.includes('rule') || q.includes('lsr')) {
+    const counts: Record<string, number> = {};
+    for (const r of reports) {
+      if (r.life_saving_rule) counts[r.life_saving_rule] = (counts[r.life_saving_rule] || 0) + 1;
     }
-    const content = `**Highest-Risk Activities:**\n\n` +
-      activityRisks.slice(0, 5).map((a, i) => `${i + 1}. **${a.activity}** — ${a.sif_count} SIF potential, avg risk score: ${a.avg_risk_score}, top failure: ${a.top_barrier_failure}`).join('\n\n');
-    return { content, sourceIds: activityRisks[0] ? reports.filter(r => r.activity === activityRisks[0].activity).slice(0, 5).map(r => r.id) : [] };
+    const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    const content = `**Most Frequently Mapped Life-Saving Rules:**\n\n` +
+      top.map(([rule, count], i) => `${i + 1}. **${rule}** — ${count} reports (${Math.round(count / reports.length * 100)}%)`).join('\n');
+    return { content, sourceIds: [] };
+  }
+
+  // ─ Activity ─
+  if (q.includes('activity') || q.includes('task') || q.includes('operation')) {
+    const top = activityRisks.slice(0, 4);
+    const content = `**Highest Risk Activities:**\n\n` +
+      top.map((a, i) => `${i + 1}. **${a.activity}** — Avg Risk Score: ${a.avg_risk_score}/100 · ${a.sif_count} SIF potential · Top barrier: ${a.top_barrier_failure}`).join('\n\n');
+    return { content, sourceIds: [] };
   }
 
   // ─ Critical count ─
-  if (q.includes('critical')) {
+  if (q.includes('how many') || q.includes('critical') || q.includes('total') || q.includes('count')) {
     return {
-      content: `**Critical Reports Summary:**\n\nThe dataset contains **${criticalReports.length}** critical-severity reports out of ${reports.length} total (${Math.round(criticalReports.length / reports.length * 100)}%).\n\nSites affected: ${[...new Set(criticalReports.map(r => r.site).filter(Boolean))].slice(0, 5).join(', ') || 'N/A'}\n\nActivities: ${[...new Set(criticalReports.map(r => r.activity).filter(Boolean))].slice(0, 4).join(', ') || 'N/A'}`,
+      content: `**Dataset Risk Overview:**\n\n` +
+        `• **Total reports:** ${reports.length}\n` +
+        `• **Critical risk:** ${criticalReports.length} reports\n` +
+        `• **SIF potential:** ${sifReports.length} reports (${Math.round(sifReports.length / reports.length * 100)}%)\n` +
+        `• **High risk:** ${reports.filter(r => r.severity === 'High' || r.risk_level === 'HIGH').length} reports\n` +
+        `• **Medium risk:** ${reports.filter(r => r.severity === 'Medium' || r.risk_level === 'MEDIUM').length} reports\n` +
+        `• **Low risk:** ${reports.filter(r => r.severity === 'Low' || r.risk_level === 'LOW').length} reports`,
       sourceIds: criticalReports.slice(0, 5).map(r => r.id)
     };
   }
 
   // ─ Patterns ─
-  if (q.includes('pattern') || q.includes('recurring')) {
-    if (patterns.length === 0) {
-      return { content: "No significant recurring patterns were detected in the current dataset.", sourceIds: [] };
-    }
+  if (q.includes('pattern') || q.includes('recurring') || q.includes('trend')) {
+    const top = patterns.slice(0, 3);
     const content = `**Top Recurring Safety Patterns:**\n\n` +
-      patterns.slice(0, 4).map((p, i) => `${i + 1}. **${p.name}** — found in ${p.frequency} reports (${p.risk_level} risk)`).join('\n\n');
-    return { content, sourceIds: patterns[0]?.report_ids.slice(0, 5) || [] };
+      top.map((p, i) => `${i + 1}. **${p.name}** (${p.risk_level} risk)\n   ${p.description}\n   Frequency: ${p.frequency} reports (${p.percentage}% of dataset)`).join('\n\n');
+    return { content, sourceIds: [] };
   }
 
-  // ─ SIF ─
-  if (q.includes('sif') || q.includes('serious') || q.includes('fatality')) {
-    return {
-      content: `**SIF Potential Summary:**\n\n**${sifReports.length}** reports (${Math.round(sifReports.length / reports.length * 100)}%) show SIF potential in the current dataset.\n\nMost common activities in SIF reports: ${[...new Set(sifReports.map(r => r.activity).filter(Boolean))].slice(0, 4).join(', ')}\n\nMost common life-saving rules: ${[...new Set(sifReports.map(r => r.life_saving_rule).filter(Boolean))].slice(0, 3).join(', ')}`,
-      sourceIds: sifReports.slice(0, 5).map(r => r.id)
-    };
-  }
-
-  // ─ Default ─
+  // ─ Default / fallback ─
   return {
-    content: `I can help you analyze the safety dataset (${reports.length} reports loaded).\n\nTry asking:\n- "What is the biggest safety risk?"\n- "Which site has the most SIF potential?"\n- "Show confined space reports"\n- "What are the top barrier failures?"\n- "Which life-saving rule appears most?"\n- "Show critical reports"`,
-    sourceIds: []
+    content: `Based on your query regarding "${query}":\n\n` +
+      `The safety dataset contains **${reports.length} reports** with **${sifReports.length} SIF potential precursors** identified.\n\n` +
+      `Try asking more specific questions like:\n` +
+      `• *"What is the biggest risk?"*\n` +
+      `• *"Which site has the most SIF reports?"*\n` +
+      `• *"What are the top barrier failures?"*\n` +
+      `• *"Show confined space reports."*`,
+    sourceIds: sifReports.slice(0, 3).map(r => r.id)
   };
 }
 
@@ -144,9 +140,9 @@ export default function CopilotPage() {
   const { reports } = useApp();
   const [messages, setMessages] = useState<CopilotMessage[]>([
     {
-      id: '0',
+      id: 'welcome',
       role: 'assistant',
-      content: `Hello! I'm **SafeSense Copilot**.\n\nI can answer questions about your uploaded safety dataset. Try asking about high-risk sites, barrier failures, SIF potential reports, recurring patterns, or specific activities.\n\n*Responses are based on the uploaded/demo dataset only.*`,
+      content: "Hello! I'm your **SafeSense Safety Copilot**. I analyze your uploaded safety reports to answer questions about risk precursors, failed barriers, site comparisons, and life-saving rules.\n\nAsk me anything about your safety dataset or click one of the suggested questions on the right.",
       timestamp: new Date().toISOString(),
     }
   ]);
@@ -162,7 +158,7 @@ export default function CopilotPage() {
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setLoading(true);
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 600));
     const { content, sourceIds } = generateResponse(text, reports);
     const assistantMsg: CopilotMessage = {
       id: (Date.now() + 1).toString(),
@@ -178,44 +174,46 @@ export default function CopilotPage() {
   function renderContent(text: string) {
     return text.split('\n').map((line, i) => {
       const bold = line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-      return <p key={i} className="text-sm text-slate-300 leading-relaxed" dangerouslySetInnerHTML={{ __html: bold || '&nbsp;' }} />;
+      return <p key={i} className="text-sm text-slate-700 leading-relaxed" dangerouslySetInnerHTML={{ __html: bold || '&nbsp;' }} />;
     });
   }
 
   return (
-    <div className="h-full flex flex-col p-6 animate-in">
+    <div className="h-full flex flex-col p-6 animate-in bg-[#F8FAFC]">
       <div className="mb-4">
-        <h1 className="section-title flex items-center gap-2"><MessageSquare className="w-6 h-6 text-blue-400" />Safety Copilot</h1>
-        <p className="section-sub">Ask questions about your safety dataset. Responses are based on uploaded data only.</p>
+        <h1 className="section-title flex items-center gap-2"><MessageSquare className="w-6 h-6 text-indigo-600" />Safety Copilot</h1>
+        <p className="section-sub mb-0">Ask questions about your safety dataset. Responses are generated from uploaded records.</p>
       </div>
 
-      <div className="flex-1 flex gap-5 min-h-0">
+      <div className="flex-1 flex flex-col lg:flex-row gap-5 min-h-0">
         {/* Chat area */}
-        <div className="flex-1 flex flex-col bg-slate-900 rounded-xl border border-slate-700/50 overflow-hidden">
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="flex-1 flex flex-col bg-white rounded-2xl border border-slate-200 shadow-soft overflow-hidden">
+          <div className="flex-1 overflow-y-auto p-5 space-y-4">
             {messages.map(msg => (
               <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                  msg.role === 'assistant' ? 'bg-blue-600' : 'bg-slate-600'
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 shadow-xs ${
+                  msg.role === 'assistant' ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-white'
                 }`}>
-                  {msg.role === 'assistant' ? <Bot className="w-4 h-4 text-white" /> : <User className="w-4 h-4 text-white" />}
+                  {msg.role === 'assistant' ? <Bot className="w-4 h-4" /> : <User className="w-4 h-4" />}
                 </div>
-                <div className={`max-w-[75%] ${msg.role === 'user' ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
-                  <div className={`rounded-xl px-4 py-3 ${
-                    msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-slate-800 border border-slate-700'
+                <div className={`max-w-[80%] ${msg.role === 'user' ? 'items-end' : 'items-start'} flex flex-col gap-1.5`}>
+                  <div className={`rounded-2xl px-4 py-3 shadow-xs ${
+                    msg.role === 'user'
+                      ? 'bg-gradient-to-r from-indigo-600 to-cyan-600 text-white'
+                      : 'bg-slate-50 border border-slate-200/80 text-slate-800'
                   }`}>
                     {msg.role === 'user' ? (
-                      <p className="text-sm">{msg.content}</p>
+                      <p className="text-sm leading-relaxed">{msg.content}</p>
                     ) : (
-                      <div className="space-y-1">{renderContent(msg.content)}</div>
+                      <div className="space-y-1.5">{renderContent(msg.content)}</div>
                     )}
                   </div>
                   {msg.source_reports && msg.source_reports.length > 0 && (
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <Database className="w-3 h-3 text-slate-500" />
-                      <span className="text-xs text-slate-500">Source reports:</span>
+                    <div className="flex items-center gap-1.5 flex-wrap px-1">
+                      <Database className="w-3.5 h-3.5 text-slate-400" />
+                      <span className="text-[11px] font-semibold text-slate-500">Source reports:</span>
                       {msg.source_reports.map(id => (
-                        <span key={id} className="text-xs bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded font-mono">{id}</span>
+                        <span key={id} className="text-[11px] bg-white text-indigo-700 border border-slate-200 px-1.5 py-0.5 rounded font-mono shadow-2xs">{id}</span>
                       ))}
                     </div>
                   )}
@@ -224,27 +222,27 @@ export default function CopilotPage() {
             ))}
             {loading && (
               <div className="flex gap-3">
-                <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center">
-                  <Bot className="w-4 h-4 text-white" />
+                <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-xs">
+                  <Bot className="w-4 h-4" />
                 </div>
-                <div className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 flex items-center gap-2">
-                  <span className="w-3 h-3 border-2 border-blue-400/30 border-t-blue-400 rounded-full animate-spin" />
-                  <span className="text-sm text-slate-400">Analyzing dataset...</span>
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 flex items-center gap-2 shadow-xs">
+                  <span className="w-3.5 h-3.5 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin" />
+                  <span className="text-sm font-medium text-slate-600">Analyzing dataset...</span>
                 </div>
               </div>
             )}
             <div ref={endRef} />
           </div>
-          <div className="border-t border-slate-700 p-3">
+          <div className="border-t border-slate-100 p-3.5 bg-slate-50/50">
             <div className="flex gap-2">
               <input
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage(input)}
-                className="input-field flex-1 text-sm"
-                placeholder="Ask about your safety data..."
+                className="input-field flex-1 text-sm bg-white"
+                placeholder="Ask a question about safety risks, precursors, sites..."
               />
-              <button onClick={() => sendMessage(input)} disabled={!input.trim() || loading} className="btn-primary px-4">
+              <button onClick={() => sendMessage(input)} disabled={!input.trim() || loading} className="btn-primary px-5">
                 <Send className="w-4 h-4" />
               </button>
             </div>
@@ -252,23 +250,25 @@ export default function CopilotPage() {
         </div>
 
         {/* Suggested questions sidebar */}
-        <div className="w-60 flex-shrink-0">
-          <div className="card h-full">
-            <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">Suggested Questions</h3>
-            <div className="space-y-2">
-              {SUGGESTED_QUESTIONS.map((q, i) => (
-                <button
-                  key={i}
-                  onClick={() => sendMessage(q)}
-                  className="w-full text-left text-xs text-slate-300 hover:text-blue-400 bg-slate-800 hover:bg-slate-700 px-3 py-2 rounded-lg transition-colors"
-                >
-                  {q}
-                </button>
-              ))}
+        <div className="w-full lg:w-72 flex-shrink-0">
+          <div className="card h-full flex flex-col justify-between">
+            <div>
+              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-3">Suggested Questions</h3>
+              <div className="space-y-2">
+                {SUGGESTED_QUESTIONS.map((q, i) => (
+                  <button
+                    key={i}
+                    onClick={() => sendMessage(q)}
+                    className="w-full text-left text-xs font-medium text-slate-700 hover:text-indigo-700 bg-slate-50 hover:bg-indigo-50/60 border border-slate-200/70 hover:border-indigo-200 px-3 py-2.5 rounded-xl transition-all shadow-2xs"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="mt-4 pt-4 border-t border-slate-700">
-              <div className="flex items-start gap-2 text-xs text-slate-500">
-                <Shield className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+            <div className="mt-5 pt-4 border-t border-slate-100">
+              <div className="flex items-start gap-2 text-xs text-slate-500 leading-relaxed">
+                <Shield className="w-4 h-4 text-indigo-600 flex-shrink-0 mt-0.5" />
                 AI supports HSE decision-making. Final decisions remain with authorized safety personnel.
               </div>
             </div>
